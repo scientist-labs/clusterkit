@@ -55,7 +55,6 @@ Gemfile.lock
 # Rust/Cargo files
 /target/
 /ext/annembed_ruby/target/
-Cargo.lock
 **/*.rs.bk
 
 # Magnus/rake-compiler artifacts
