@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "clusterkit/version"
-require_relative "clusterkit/clusterkit"
+require "clusterkit/clusterkit"
 require_relative "clusterkit/configuration"
 
 # Main module for ClusterKit gem
