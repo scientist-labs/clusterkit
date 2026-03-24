@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-magnus = { version = "0.6", features = ["embed"] }
+magnus = { version = "0.8", features = ["embed"] }
 annembed = { git = "https://github.com/scientist-labs/annembed", tag = "clusterkit-0.1.1" }
 hnsw_rs = { git = "https://github.com/scientist-labs/hnswlib-rs", tag = "clusterkit-0.1.0" }
 hdbscan = "0.11"

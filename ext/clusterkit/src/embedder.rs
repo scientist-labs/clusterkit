@@ -1,4 +1,4 @@
-use magnus::{Error, RArray, RHash, Value, TryConvert, Integer, Module, Object};
+use magnus::{Error, RArray, RHash, Value, TryConvert, Integer, Module, Object, Ruby};
 use magnus::value::ReprValue;
 use hnsw_rs::prelude::*;
 use annembed::prelude::*;
@@ -21,7 +21,8 @@ struct SavedUMAPModel {
 }
 
 pub fn init(parent: &magnus::RModule) -> Result<(), Error> {
-    let umap_class = parent.define_class("RustUMAP", magnus::class::object())?;
+    let ruby = Ruby::get().unwrap();
+    let umap_class = parent.define_class("RustUMAP", ruby.class_object())?;
 
     umap_class.define_singleton_method("new", magnus::function!(RustUMAP::new, 1))?;
     umap_class.define_singleton_method("load_model", magnus::function!(RustUMAP::load_model, 1))?;
@@ -40,15 +41,15 @@ struct RustUMAP {
     random_seed: Option<u64>,
     nb_grad_batch: usize,
     nb_sampling_by_edge: usize,
-    // Store the training data and embeddings for transform approximation
-    // Use RefCell for interior mutability
     training_data: RefCell<Option<Vec<Vec<f32>>>>,
     training_embeddings: RefCell<Option<Vec<Vec<f64>>>>,
 }
 
 impl RustUMAP {
     fn new(options: RHash) -> Result<Self, Error> {
-        let n_components = match options.lookup::<_, Value>(magnus::Symbol::new("n_components")) {
+        let ruby = Ruby::get().unwrap();
+
+        let n_components = match options.lookup::<_, Value>(ruby.to_symbol("n_components")) {
             Ok(val) => {
                 if val.is_nil() {
                     2
@@ -61,7 +62,7 @@ impl RustUMAP {
             Err(_) => 2,
         };
 
-        let n_neighbors = match options.lookup::<_, Value>(magnus::Symbol::new("n_neighbors")) {
+        let n_neighbors = match options.lookup::<_, Value>(ruby.to_symbol("n_neighbors")) {
             Ok(val) => {
                 if val.is_nil() {
                     15
@@ -74,7 +75,7 @@ impl RustUMAP {
             Err(_) => 15,
         };
 
-        let random_seed = match options.lookup::<_, Value>(magnus::Symbol::new("random_seed")) {
+        let random_seed = match options.lookup::<_, Value>(ruby.to_symbol("random_seed")) {
             Ok(val) => {
                 if val.is_nil() {
                     None
@@ -87,10 +88,10 @@ impl RustUMAP {
             Err(_) => None,
         };
 
-        let nb_grad_batch = match options.lookup::<_, Value>(magnus::Symbol::new("nb_grad_batch")) {
+        let nb_grad_batch = match options.lookup::<_, Value>(ruby.to_symbol("nb_grad_batch")) {
             Ok(val) => {
                 if val.is_nil() {
-                    10  // Default value
+                    10
                 } else {
                     Integer::try_convert(val)
                         .map(|i| i.to_u32().unwrap_or(10) as usize)
@@ -99,11 +100,11 @@ impl RustUMAP {
             }
             Err(_) => 10,
         };
-        
-        let nb_sampling_by_edge = match options.lookup::<_, Value>(magnus::Symbol::new("nb_sampling_by_edge")) {
+
+        let nb_sampling_by_edge = match options.lookup::<_, Value>(ruby.to_symbol("nb_sampling_by_edge")) {
             Ok(val) => {
                 if val.is_nil() {
-                    8  // Default value
+                    8
                 } else {
                     Integer::try_convert(val)
                         .map(|i| i.to_u32().unwrap_or(8) as usize)
@@ -125,6 +126,8 @@ impl RustUMAP {
     }
 
     fn fit_transform(&self, data: Value) -> Result<RArray, Error> {
+        let ruby = Ruby::get().unwrap();
+
         // Convert Ruby array to Rust Vec<Vec<f32>> using shared helper
         let data_f32 = ruby_array_to_vec_vec_f32(data)?;
 
@@ -149,9 +152,7 @@ impl RustUMAP {
             .enumerate()
             .map(|(i, v)| (v, i))
             .collect();
-        
-        // Use serial_insert for reproducibility when seed is provided,
-        // parallel_insert for performance when no seed
+
         if self.random_seed.is_some() {
             hnsw.serial_insert(&data_with_id);
         } else {
@@ -160,36 +161,34 @@ impl RustUMAP {
 
         // Create KGraph from HNSW
         let kgraph: annembed::fromhnsw::kgraph::KGraph<f32> = annembed::fromhnsw::kgraph::kgraph_from_hnsw_all(&hnsw, self.n_neighbors)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
         // Set up embedding parameters
         let mut embed_params = EmbedderParams::default();
         embed_params.asked_dim = self.n_components;
-        embed_params.nb_grad_batch = self.nb_grad_batch;  // Configurable from Ruby
+        embed_params.nb_grad_batch = self.nb_grad_batch;
         embed_params.scale_rho = 1.;
         embed_params.beta = 1.;
         embed_params.b = 1.;
         embed_params.grad_step = 1.;
-        embed_params.nb_sampling_by_edge = self.nb_sampling_by_edge;  // Configurable from Ruby
-        // Enable diffusion map initialization (annembed now has fallback to random if it fails)
+        embed_params.nb_sampling_by_edge = self.nb_sampling_by_edge;
         embed_params.dmap_init = true;
-        embed_params.random_seed = self.random_seed;  // Pass seed through to annembed
+        embed_params.random_seed = self.random_seed;
 
         // Create embedder and perform embedding
         let mut embedder = Embedder::new(&kgraph, embed_params);
 
         let embed_result = embedder.embed()
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), 
+            .map_err(|e| Error::new(ruby.exception_runtime_error(),
                 format!("Embedding failed: {}", e)))?;
 
         if embed_result == 0 {
-            return Err(Error::new(magnus::exception::runtime_error(), "No points were embedded"));
+            return Err(Error::new(ruby.exception_runtime_error(), "No points were embedded"));
         }
 
         // Get embedded data
         let embedded_array = embedder.get_embedded_reindexed();
 
-        // Store results in a simpler format
         let mut embeddings = Vec::new();
         for i in 0..embedded_array.nrows() {
             let mut row = Vec::new();
@@ -198,13 +197,15 @@ impl RustUMAP {
             }
             embeddings.push(row);
         }
+
         // Store the training data and embeddings for future transforms
         *self.training_data.borrow_mut() = Some(data_f32.clone());
         *self.training_embeddings.borrow_mut() = Some(embeddings.clone());
+
         // Convert result back to Ruby array
-        let result = RArray::new();
+        let result = ruby.ary_new();
         for embedding in &embeddings {
-            let row = RArray::new();
+            let row = ruby.ary_new();
             for &val in embedding {
                 row.push(val)?;
             }
@@ -213,16 +214,15 @@ impl RustUMAP {
         Ok(result)
     }
 
-    // Save the full model (training data + embeddings + params) for future transforms
     fn save_model(&self, path: String) -> Result<(), Error> {
-        // Check if we have training data
+        let ruby = Ruby::get().unwrap();
         let training_data = self.training_data.borrow();
         let training_embeddings = self.training_embeddings.borrow();
 
         let training_data_ref = training_data.as_ref()
-            .ok_or_else(|| Error::new(magnus::exception::runtime_error(), "No model to save. Run fit_transform first."))?;
+            .ok_or_else(|| Error::new(ruby.exception_runtime_error(), "No model to save. Run fit_transform first."))?;
         let training_embeddings_ref = training_embeddings.as_ref()
-            .ok_or_else(|| Error::new(magnus::exception::runtime_error(), "No embeddings to save."))?;
+            .ok_or_else(|| Error::new(ruby.exception_runtime_error(), "No embeddings to save."))?;
 
         let saved_model = SavedUMAPModel {
             n_components: self.n_components,
@@ -234,28 +234,29 @@ impl RustUMAP {
         };
 
         let serialized = bincode::serialize(&saved_model)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
         let mut file = File::create(&path)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
         file.write_all(&serialized)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
         Ok(())
     }
 
-    // Load a full model for transforming new data
     fn load_model(path: String) -> Result<Self, Error> {
+        let ruby = Ruby::get().unwrap();
+
         let mut file = File::open(&path)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
         let saved_model: SavedUMAPModel = bincode::deserialize(&buffer)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e.to_string()))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
         Ok(RustUMAP {
             n_components: saved_model.n_components,
@@ -268,43 +269,36 @@ impl RustUMAP {
         })
     }
 
-    // Transform new data using k-NN approximation with the training data
     fn transform(&self, data: Value) -> Result<RArray, Error> {
-        // Get training data
+        let ruby = Ruby::get().unwrap();
         let training_data = self.training_data.borrow();
         let training_embeddings = self.training_embeddings.borrow();
 
         let training_data_ref = training_data.as_ref()
-            .ok_or_else(|| Error::new(magnus::exception::runtime_error(), "No model loaded. Load a model or run fit_transform first."))?;
+            .ok_or_else(|| Error::new(ruby.exception_runtime_error(), "No model loaded. Load a model or run fit_transform first."))?;
         let training_embeddings_ref = training_embeddings.as_ref()
-            .ok_or_else(|| Error::new(magnus::exception::runtime_error(), "No embeddings available."))?;
+            .ok_or_else(|| Error::new(ruby.exception_runtime_error(), "No embeddings available."))?;
 
-        // Convert input data to Rust format using shared helper
         let new_data = ruby_array_to_vec_vec_f32(data)?;
 
-        // For each new point, find k nearest neighbors in training data
-        // and average their embeddings (weighted by distance)
         let k = self.n_neighbors.min(training_data_ref.len());
-        let result = RArray::new();
+        let result = ruby.ary_new();
 
         for new_point in &new_data {
-            // Calculate distances to all training points
             let mut distances: Vec<(f32, usize)> = Vec::new();
             for (idx, train_point) in training_data_ref.iter().enumerate() {
                 let dist = euclidean_distance(new_point, train_point);
                 distances.push((dist, idx));
             }
 
-            // Sort by distance and take k nearest
             distances.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             let k_nearest = &distances[..k];
 
-            // Weighted average of k nearest embeddings
             let mut avg_embedding = vec![0.0; self.n_components];
             let mut total_weight = 0.0;
 
             for &(dist, idx) in k_nearest {
-                let weight = 1.0 / (dist as f64 + 0.001); // Inverse distance weighting
+                let weight = 1.0 / (dist as f64 + 0.001);
                 total_weight += weight;
 
                 for (i, &val) in training_embeddings_ref[idx].iter().enumerate() {
@@ -312,13 +306,11 @@ impl RustUMAP {
                 }
             }
 
-            // Normalize
             for val in &mut avg_embedding {
                 *val /= total_weight;
             }
 
-            // Convert to Ruby array
-            let row = RArray::new();
+            let row = ruby.ary_new();
             for val in avg_embedding {
                 row.push(val)?;
             }

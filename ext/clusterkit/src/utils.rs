@@ -1,34 +1,34 @@
-use magnus::{function, prelude::*, Error, Value, RArray, TryConvert, Float, Integer};
+use magnus::{function, prelude::*, Error, Value, RArray, TryConvert, Float, Integer, Ruby};
 use ndarray::Array2;
 
 pub fn init(parent: &magnus::RModule) -> Result<(), Error> {
     let utils_module = parent.define_module("Utils")?;
-    
+
     utils_module.define_singleton_method(
         "estimate_intrinsic_dimension_rust",
         function!(estimate_intrinsic_dimension, 2),
     )?;
-    
+
     utils_module.define_singleton_method(
         "estimate_hubness_rust",
         function!(estimate_hubness, 1),
     )?;
-    
+
     Ok(())
 }
 
 fn estimate_intrinsic_dimension(_data: Value, _k_neighbors: usize) -> Result<f64, Error> {
-    // TODO: Implement using annembed
+    let ruby = Ruby::get().unwrap();
     Err(Error::new(
-        magnus::exception::not_imp_error(),
+        ruby.exception_not_imp_error(),
         "Dimension estimation not implemented yet",
     ))
 }
 
 fn estimate_hubness(_data: Value) -> Result<Value, Error> {
-    // TODO: Implement using annembed
+    let ruby = Ruby::get().unwrap();
     Err(Error::new(
-        magnus::exception::not_imp_error(),
+        ruby.exception_not_imp_error(),
         "Hubness estimation not implemented yet",
     ))
 }
@@ -36,12 +36,13 @@ fn estimate_hubness(_data: Value) -> Result<Value, Error> {
 /// Convert Ruby 2D array to ndarray Array2<f64>
 /// Handles validation and provides consistent error messages
 pub fn ruby_array_to_ndarray2(data: Value) -> Result<Array2<f64>, Error> {
+    let ruby = Ruby::get().unwrap();
     let rarray: RArray = TryConvert::try_convert(data)?;
     let n_samples = rarray.len();
 
     if n_samples == 0 {
         return Err(Error::new(
-            magnus::exception::arg_error(),
+            ruby.exception_arg_error(),
             "Data cannot be empty",
         ));
     }
@@ -52,7 +53,7 @@ pub fn ruby_array_to_ndarray2(data: Value) -> Result<Array2<f64>, Error> {
 
     if n_features == 0 {
         return Err(Error::new(
-            magnus::exception::arg_error(),
+            ruby.exception_arg_error(),
             "Data rows cannot be empty",
         ));
     }
@@ -61,11 +62,11 @@ pub fn ruby_array_to_ndarray2(data: Value) -> Result<Array2<f64>, Error> {
     let mut data_array = Array2::<f64>::zeros((n_samples, n_features));
     for i in 0..n_samples {
         let row: RArray = rarray.entry(i as isize)?;
-        
+
         // Validate row length consistency
         if row.len() != n_features {
             return Err(Error::new(
-                magnus::exception::arg_error(),
+                ruby.exception_arg_error(),
                 format!("Row {} has {} elements, expected {}", i, row.len(), n_features),
             ));
         }
@@ -80,14 +81,15 @@ pub fn ruby_array_to_ndarray2(data: Value) -> Result<Array2<f64>, Error> {
 }
 
 /// Convert Ruby 2D array to Vec<Vec<f64>>
-/// Handles validation and provides consistent error messages  
+/// Handles validation and provides consistent error messages
 pub fn ruby_array_to_vec_vec_f64(data: Value) -> Result<Vec<Vec<f64>>, Error> {
+    let ruby = Ruby::get().unwrap();
     let rarray: RArray = TryConvert::try_convert(data)?;
     let n_samples = rarray.len();
 
     if n_samples == 0 {
         return Err(Error::new(
-            magnus::exception::arg_error(),
+            ruby.exception_arg_error(),
             "Data cannot be empty",
         ));
     }
@@ -98,13 +100,13 @@ pub fn ruby_array_to_vec_vec_f64(data: Value) -> Result<Vec<Vec<f64>>, Error> {
     for i in 0..n_samples {
         let row: RArray = rarray.entry(i as isize)?;
         let n_features = row.len();
-        
+
         // Check row length consistency
         match expected_features {
             Some(expected) => {
                 if n_features != expected {
                     return Err(Error::new(
-                        magnus::exception::arg_error(),
+                        ruby.exception_arg_error(),
                         format!("Row {} has {} elements, expected {}", i, n_features, expected),
                     ));
                 }
@@ -126,12 +128,13 @@ pub fn ruby_array_to_vec_vec_f64(data: Value) -> Result<Vec<Vec<f64>>, Error> {
 /// Convert Ruby 2D array to Vec<Vec<f32>>
 /// For algorithms that require f32 precision (like UMAP)
 pub fn ruby_array_to_vec_vec_f32(data: Value) -> Result<Vec<Vec<f32>>, Error> {
+    let ruby = Ruby::get().unwrap();
     let rarray: RArray = TryConvert::try_convert(data)?;
     let array_len = rarray.len();
 
     if array_len == 0 {
         return Err(Error::new(
-            magnus::exception::arg_error(),
+            ruby.exception_arg_error(),
             "Input data cannot be empty",
         ));
     }
@@ -142,7 +145,7 @@ pub fn ruby_array_to_vec_vec_f32(data: Value) -> Result<Vec<Vec<f32>>, Error> {
         let row = rarray.entry::<Value>(i as isize)?;
         let row_array = RArray::try_convert(row).map_err(|_| {
             Error::new(
-                magnus::exception::type_error(),
+                ruby.exception_type_error(),
                 "Expected array of arrays (2D array)",
             )
         })?;
@@ -158,7 +161,7 @@ pub fn ruby_array_to_vec_vec_f32(data: Value) -> Result<Vec<Vec<f32>>, Error> {
                 i.to_i64()? as f32
             } else {
                 return Err(Error::new(
-                    magnus::exception::type_error(),
+                    ruby.exception_type_error(),
                     "All values must be numeric",
                 ));
             };
@@ -168,7 +171,7 @@ pub fn ruby_array_to_vec_vec_f32(data: Value) -> Result<Vec<Vec<f32>>, Error> {
         // Validate row length consistency
         if !rust_data.is_empty() && rust_row.len() != rust_data[0].len() {
             return Err(Error::new(
-                magnus::exception::arg_error(),
+                ruby.exception_arg_error(),
                 "All rows must have the same length",
             ));
         }
