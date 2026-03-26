@@ -178,9 +178,28 @@ impl RustUMAP {
         // Create embedder and perform embedding
         let mut embedder = Embedder::new(&kgraph, embed_params);
 
-        let embed_result = embedder.embed()
-            .map_err(|e| Error::new(ruby.exception_runtime_error(),
-                format!("Embedding failed: {}", e)))?;
+        let embed_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            embedder.embed()
+        }));
+
+        let embed_result = match embed_result {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => {
+                return Err(Error::new(ruby.exception_runtime_error(),
+                    format!("Embedding failed: {}", e)));
+            }
+            Err(panic_info) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else {
+                    "unknown panic".to_string()
+                };
+                return Err(Error::new(ruby.exception_runtime_error(),
+                    format!("Embedding panicked: {}", msg)));
+            }
+        };
 
         if embed_result == 0 {
             return Err(Error::new(ruby.exception_runtime_error(), "No points were embedded"));

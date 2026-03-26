@@ -88,7 +88,7 @@ dependencies = [
 [[package]]
 name = "annembed"
 version = "0.1.5"
-source = "git+https://github.com/scientist-labs/annembed?tag=clusterkit-0.1.1#7a5803405087c10c82185f113e3befb953cc9bab"
+source = "git+https://github.com/scientist-labs/annembed?tag=clusterkit-0.2.6#8f8c451367b3a20817cc9dd9803c56aa0c2b9859"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
