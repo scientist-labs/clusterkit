@@ -1,60 +1,58 @@
 name: Release
 
+# Thin caller for the shared scientist-labs/rust-gem-release reusable workflow (pinned
+# @v0, a moving major). It owns only what a reusable (on: workflow_call) workflow cannot:
+# the tag trigger, the contents:write token grant, and clusterkit's per-gem inputs.
+#
+# Release procedure (the tag drives it; a CI-created tag would not re-trigger):
+#   1. bump lib/clusterkit/version.rb
+#   2. git commit -am "Release X.Y.Z"
+#   3. git tag X.Y.Z && git push origin HEAD --tags
+#
+# On workflow_dispatch, publish defaults to FALSE = dry-run (builds, no RubyGems push).
+# On a tag push, publish is true but the RubyGems push is still token-gated: an empty
+# RUBYGEMS_API_KEY secret makes the push step a safe no-op.
+
 on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"        # release:    0.2.6
+      - "[0-9]+.[0-9]+.[0-9]+.*"      # prerelease: 0.2.6.pre (bare-numeric form)
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+.*"     # v-prefixed prerelease: v0.2.6.pre
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to release (e.g. 1.0.0)"
-        required: true
-        type: string
+      publish:
+        type: boolean
+        default: false
+        description: "push to RubyGems (default off = dry-run)"
+
+# A reusable workflow can only REDUCE the inherited token scope, never elevate it — so
+# the caller MUST grant contents: write here (and the repo's default workflow token must
+# not be read-only) or `gh release create` 403s.
+permissions:
+  contents: write
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
-
-      - name: Update version
-        run: |
-          VERSION="${{ inputs.version }}"
-          sed -i "s/VERSION = \".*\"/VERSION = \"$VERSION\"/" lib/clusterkit/version.rb
-          echo "Updated version to $VERSION"
-          cat lib/clusterkit/version.rb
-
-      - name: Commit and tag
-        run: |
-          VERSION="${{ inputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add lib/clusterkit/version.rb
-          git commit -m "Release v$VERSION"
-          git tag "$VERSION"
-          git push origin HEAD:${{ github.ref_name }} --tags
-
-      - name: Build gem
-        run: gem build clusterkit.gemspec
-
-      - name: Push to RubyGems
-        run: |
-          mkdir -p ~/.gem
-          echo "---" > ~/.gem/credentials
-          echo ":rubygems_api_key: ${{ secrets.RUBYGEMS_API_KEY }}" >> ~/.gem/credentials
-          chmod 0600 ~/.gem/credentials
-          gem push clusterkit-*.gem
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${{ inputs.version }}"
-          gh release create "$VERSION" \
-            --title "v$VERSION" \
-            --generate-notes \
-            clusterkit-*.gem
+    uses: scientist-labs/rust-gem-release/.github/workflows/release.yml@v0
+    with:
+      # gem-name == ext-name == gemspec basename == lib subdir == Cargo package name ==
+      # "clusterkit", so ext-name / gemspec / platform-gem-env all use the defaults.
+      gem-name: clusterkit
+      version-command: ruby -r./lib/clusterkit/version -e 'print ClusterKit::VERSION'
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
+      # The linux precompiled legs are disabled for now: the extension links BLAS/LAPACK
+      # and ext/clusterkit's default `openblas-static` feature compiles OpenBLAS from
+      # C+Fortran source, which the oxidize-rb cross-gem MUSL container cannot provision
+      # (no gfortran/cmake, and the shared workflow exposes no input to install them or
+      # to select `openblas-system`). Ship source + arm64-darwin first (darwin links the
+      # system Accelerate framework, no OpenBLAS build), then re-enable the linux legs
+      # once rust-gem-release can provision/select system OpenBLAS.
+      build-darwin: true
+      build-x86_64-linux: false
+      build-aarch64-linux: false
+    secrets:
+      # required: false in the shared workflow — an empty secret yields a clean skip of
+      # the RubyGems push instead of a hard error.
+      rubygems-api-key: ${{ secrets.RUBYGEMS_API_KEY }}

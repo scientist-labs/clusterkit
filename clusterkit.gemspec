@@ -25,7 +25,21 @@ Gem::Specification.new do |spec|
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
-  spec.extensions = ["ext/clusterkit/extconf.rb"]
+
+  # Precompiled platform gems (arm64-darwin built natively on a macOS runner; the
+  # x86_64-linux/aarch64-linux gems assembled by rb_sys via oxidize-rb cross-gem) carry
+  # one compiled extension per Ruby ABI under lib/clusterkit/<major.minor>/ and must NOT
+  # declare extensions, or RubyGems would recompile from Rust source on install —
+  # defeating the precompiled gem. .gitignore excludes **.bundle/**.so, so the
+  # git-ls-files-based spec.files above drops the native artifacts; the explicit Dir[]
+  # globs below re-add them for the platform gem. Unset env => normal source gem.
+  if (platform_gem = ENV["RUST_GEM_PLATFORM"])
+    spec.platform = platform_gem
+    spec.extensions = []
+    spec.files += Dir["lib/clusterkit/*/clusterkit.bundle"] + Dir["lib/clusterkit/*/clusterkit.so"]
+  else
+    spec.extensions = ["ext/clusterkit/extconf.rb"]
+  end
 
   # Runtime dependencies
   # Numo is optional but recommended for better performance
