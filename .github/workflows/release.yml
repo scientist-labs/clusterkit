@@ -45,7 +45,7 @@ jobs:
     # Normal PRs skip the expensive matrix; only a `dry-run-release` label opts in.
     # Tag pushes and manual dispatch always run.
     if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'dry-run-release') }}
-    uses: scientist-labs/rust-gem-release/.github/workflows/release.yml@v0
+    uses: scientist-labs/rust-gem-release/.github/workflows/release.yml@0.9.0
     with:
       # gem-name == ext-name == gemspec basename == lib subdir == Cargo package name ==
       # "clusterkit", so ext-name / gemspec / platform-gem-env all use the defaults.
@@ -54,24 +54,26 @@ jobs:
       # Publish only on tag push, or on a manual dispatch that explicitly opts in.
       # Every PR (dry-run-release matrix) stays publish=false.
       publish: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
-      # FULL linux precompiled support. clusterkit's extension links BLAS/LAPACK; the
-      # default `openblas-static` feature compiles OpenBLAS from C+Fortran source, which
-      # the stock rb-sys-dock cross image cannot provision (no gfortran). Two pieces make
-      # the linux legs build:
-      #   1. linux-cross-image-repo pre-seeds a deps-enriched rb-sys cross image
-      #      (apt: libopenblas-dev liblapack-dev gfortran, …) onto each runner's Docker
-      #      daemon under the name rb-sys-dock expects, so the cross build links the
-      #      SYSTEM OpenBLAS instead of compiling it.
-      #   2. ext/clusterkit/extconf.rb selects the `openblas-system` Cargo feature on
-      #      linux (committed in this PR). The cargo-config inputs CANNOT do this: a
-      #      .cargo/config.toml [env] reaches cargo-spawned procs, not extconf at mkmf
-      #      time, and rb-sys-dock does not forward host env — so the backend choice
-      #      must live in committed extconf code, not a workflow input.
-      # system OpenBLAS/LAPACK + gfortran, apt-installed into the cross image inline
-      # (FROM rbsys/<platform>:0.9.128) so the openblas-system feature links instead
-      # of compiling OpenBLAS from source. linux-rbsys-tag defaults to 0.9.128 (==
-      # clusterkit's resolved rb_sys in Cargo.lock), so it is omitted.
-      linux-extra-apt: gfortran libopenblas-dev liblapack-dev
+      # FULL linux precompiled support. clusterkit links BLAS/LAPACK; ext/clusterkit/
+      # extconf.rb selects the `openblas-system` Cargo feature on linux (committed in
+      # this PR) so it links the SYSTEM OpenBLAS instead of compiling it from source.
+      # The inline cross image stages the BLAS libs for BOTH target arches: the x86_64
+      # leg uses the amd64 libs; the aarch64 leg needs the arm64 (multiarch) libs under
+      # /usr/lib/aarch64-linux-gnu, which requires dpkg --add-architecture arm64 + the
+      # ubuntu-ports arm64 apt source (the base is amd64-only ubuntu focal).
+      linux-image-setup: >-
+        sed -i 's|^deb http|deb [arch=amd64] http|g' /etc/apt/sources.list &&
+        dpkg --add-architecture arm64 &&
+        printf 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports focal main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports focal-updates main universe\n' > /etc/apt/sources.list.d/arm64.list &&
+        apt-get update &&
+        apt-get install -y --no-install-recommends gfortran pkg-config libopenblas-dev liblapack-dev libopenblas-dev:arm64 liblapack-dev:arm64
+      # For the aarch64 cross build, point pkg-config at the arm64 .pc files and allow
+      # cross so openblas-src resolves the arm64 OpenBLAS, not the host amd64 one.
+      aarch64-cargo-config: |
+        [env]
+        PKG_CONFIG_ALLOW_CROSS = "1"
+        PKG_CONFIG_PATH = "/usr/lib/aarch64-linux-gnu/pkgconfig"
+        PKG_CONFIG_LIBDIR = "/usr/lib/aarch64-linux-gnu/pkgconfig"
       build-darwin: true
       build-x86_64-linux: true
       build-aarch64-linux: true
