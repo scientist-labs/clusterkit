@@ -26,6 +26,13 @@ on:
         type: boolean
         default: false
         description: "push to RubyGems (default off = dry-run)"
+  # A PR labeled `dry-run-release` runs the full precompiled release matrix as a
+  # publish=false dry-run, validating the real pipeline (cross-gem + fat-gem
+  # assembly + the system-OpenBLAS linux legs) pre-merge. A reusable workflow is
+  # branch-only, so workflow_dispatch cannot reach it — the label is the only
+  # pre-merge lever.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 # A reusable workflow can only REDUCE the inherited token scope, never elevate it — so
 # the caller MUST grant contents: write here (and the repo's default workflow token must
@@ -35,23 +42,36 @@ permissions:
 
 jobs:
   release:
+    # Normal PRs skip the expensive matrix; only a `dry-run-release` label opts in.
+    # Tag pushes and manual dispatch always run.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'dry-run-release') }}
     uses: scientist-labs/rust-gem-release/.github/workflows/release.yml@v0
     with:
       # gem-name == ext-name == gemspec basename == lib subdir == Cargo package name ==
       # "clusterkit", so ext-name / gemspec / platform-gem-env all use the defaults.
       gem-name: clusterkit
       version-command: ruby -r./lib/clusterkit/version -e 'print ClusterKit::VERSION'
-      publish: ${{ github.event_name == 'push' || inputs.publish }}
-      # The linux precompiled legs are disabled for now: the extension links BLAS/LAPACK
-      # and ext/clusterkit's default `openblas-static` feature compiles OpenBLAS from
-      # C+Fortran source, which the oxidize-rb cross-gem MUSL container cannot provision
-      # (no gfortran/cmake, and the shared workflow exposes no input to install them or
-      # to select `openblas-system`). Ship source + arm64-darwin first (darwin links the
-      # system Accelerate framework, no OpenBLAS build), then re-enable the linux legs
-      # once rust-gem-release can provision/select system OpenBLAS.
+      # Publish only on tag push, or on a manual dispatch that explicitly opts in.
+      # Every PR (dry-run-release matrix) stays publish=false.
+      publish: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+      # FULL linux precompiled support. clusterkit's extension links BLAS/LAPACK; the
+      # default `openblas-static` feature compiles OpenBLAS from C+Fortran source, which
+      # the stock rb-sys-dock cross image cannot provision (no gfortran). Two pieces make
+      # the linux legs build:
+      #   1. linux-cross-image-repo pre-seeds a deps-enriched rb-sys cross image
+      #      (apt: libopenblas-dev liblapack-dev gfortran, …) onto each runner's Docker
+      #      daemon under the name rb-sys-dock expects, so the cross build links the
+      #      SYSTEM OpenBLAS instead of compiling it.
+      #   2. ext/clusterkit/extconf.rb selects the `openblas-system` Cargo feature on
+      #      linux (committed in this PR). The cargo-config inputs CANNOT do this: a
+      #      .cargo/config.toml [env] reaches cargo-spawned procs, not extconf at mkmf
+      #      time, and rb-sys-dock does not forward host env — so the backend choice
+      #      must live in committed extconf code, not a workflow input.
+      linux-cross-image-repo: ghcr.io/scientist-labs/rust-gem-cross
+      linux-cross-image-tag: "0.9.128"   # == clusterkit's resolved rb_sys (Cargo.lock)
       build-darwin: true
-      build-x86_64-linux: false
-      build-aarch64-linux: false
+      build-x86_64-linux: true
+      build-aarch64-linux: true
     secrets:
       # required: false in the shared workflow — an empty secret yields a clean skip of
       # the RubyGems push instead of a hard error.
