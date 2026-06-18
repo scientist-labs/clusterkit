@@ -1,13 +1,13 @@
 name: build
 
 # Thin PR-CI caller for the shared scientist-labs/rust-gem-release build workflow
-# (pinned @v0). Replaces the hand-rolled ci.yml: checkout + setup-ruby + cargo cache +
+# (pinned @0.10.0). Replaces the hand-rolled ci.yml: checkout + setup-ruby + cargo cache +
 # rake compile + rake spec now live once in the shared workflow.
 
 on: pull_request
 
 jobs:
   test:
-    uses: scientist-labs/rust-gem-release/.github/workflows/build.yml@v0
+    uses: scientist-labs/rust-gem-release/.github/workflows/build.yml@0.10.0
     with:
       test-command: bundle exec rake spec

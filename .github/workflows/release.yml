@@ -1,7 +1,7 @@
 name: Release
 
 # Thin caller for the shared scientist-labs/rust-gem-release reusable workflow (pinned
-# @v0, a moving major). It owns only what a reusable (on: workflow_call) workflow cannot:
+# @0.10.0, an explicit version). It owns only what a reusable (on: workflow_call) workflow cannot:
 # the tag trigger, the contents:write token grant, and clusterkit's per-gem inputs.
 #
 # Release procedure (the tag drives it; a CI-created tag would not re-trigger):
