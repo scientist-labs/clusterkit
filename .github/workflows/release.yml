@@ -67,8 +67,11 @@ jobs:
       #      .cargo/config.toml [env] reaches cargo-spawned procs, not extconf at mkmf
       #      time, and rb-sys-dock does not forward host env — so the backend choice
       #      must live in committed extconf code, not a workflow input.
-      linux-cross-image-repo: ghcr.io/scientist-labs/rust-gem-cross
-      linux-cross-image-tag: "0.9.128"   # == clusterkit's resolved rb_sys (Cargo.lock)
+      # system OpenBLAS/LAPACK + gfortran, apt-installed into the cross image inline
+      # (FROM rbsys/<platform>:0.9.128) so the openblas-system feature links instead
+      # of compiling OpenBLAS from source. linux-rbsys-tag defaults to 0.9.128 (==
+      # clusterkit's resolved rb_sys in Cargo.lock), so it is omitted.
+      linux-extra-apt: gfortran libopenblas-dev liblapack-dev
       build-darwin: true
       build-x86_64-linux: true
       build-aarch64-linux: true
