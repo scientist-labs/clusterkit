@@ -84,10 +84,8 @@ jobs:
         PKG_CONFIG_ALLOW_CROSS = "1"
         PKG_CONFIG_PATH_aarch64-unknown-linux-gnu = "/usr/lib/aarch64-linux-gnu/pkgconfig"
         PKG_CONFIG_LIBDIR_aarch64-unknown-linux-gnu = "/usr/lib/aarch64-linux-gnu/pkgconfig"
-      # FAST-ITERATION: build ONLY the aarch64 leg while grinding the cross link green
-      # (~12 min vs the ~40-min full matrix). Restored to the full matrix once green.
-      build-darwin: false
-      build-x86_64-linux: false
+      build-darwin: true
+      build-x86_64-linux: true
       build-aarch64-linux: true
     secrets:
       # required: false in the shared workflow — an empty secret yields a clean skip of
