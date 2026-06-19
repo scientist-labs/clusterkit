@@ -1,17 +1,31 @@
 require "bundler/gem_tasks"
 require "rake/extensiontask"
-require "rspec/core/rake_task"
 
-# RSpec test task
-RSpec::Core::RakeTask.new(:spec)
+# rspec is a DEVELOPMENT-only dependency. The cross-compile build container
+# (rb-sys-dock, via scientist-labs/rust-gem-release) installs the runtime bundle
+# only, so this require would raise LoadError and abort `rake` before the native
+# build task can run. Guard it so this Rakefile always loads; the spec task simply
+# isn't available in a build-only environment.
+begin
+  require "rspec/core/rake_task"
+  RSpec::Core::RakeTask.new(:spec)
+rescue LoadError
+  desc "run specs (rspec unavailable in this environment)"
+  task(:spec) { abort "rspec is a development dependency and is not installed here" }
+end
 
-# Define the Rust extension
-spec = Gem::Specification.load("clusterkit.gemspec")
-Rake::ExtensionTask.new("clusterkit", spec) do |ext|
+# Define the Rust extension. Passing the loaded gemspec to ExtensionTask makes
+# rake-compiler expose the `native:<platform>` tasks rb-sys-dock invokes for each
+# precompiled leg; without it the cross build fails with "Don't know how to build task".
+GEMSPEC = Gem::Specification.load("clusterkit.gemspec")
+Rake::ExtensionTask.new("clusterkit", GEMSPEC) do |ext|
   ext.lib_dir = "lib/clusterkit"
   ext.source_pattern = "*.{rs,toml}"
   ext.cross_compile = true
-  ext.cross_platform = %w[x86-mingw32 x64-mingw32 x86-linux x86_64-linux x86_64-darwin arm64-darwin]
+  # Union of the precompiled targets this gem ships: both glibc linux arches
+  # (assembled by oxidize-rb cross-gem in rb-sys-dock) plus Apple Silicon
+  # (built natively on a macOS runner).
+  ext.cross_platform = %w[x86_64-linux aarch64-linux arm64-darwin]
 end
 
 task default: [:compile, :spec]

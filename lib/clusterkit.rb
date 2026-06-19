@@ -1,7 +1,20 @@
 # frozen_string_literal: true
 
 require_relative "clusterkit/version"
-require "clusterkit/clusterkit"
+
+# Load the native extension. Precompiled platform gems install one .so/.bundle per
+# Ruby ABI under lib/clusterkit/<major.minor>/, while a source build (and the native
+# darwin gem) produce the flat lib/clusterkit/clusterkit.{so,bundle}. Try the
+# versioned path first, then fall back to flat. Use `require` (not
+# `require_relative`) so RubyGems can resolve the extension through $LOAD_PATH when
+# it installs native artifacts outside lib/.
+begin
+  RUBY_VERSION =~ /(\d+\.\d+)/
+  require "clusterkit/#{Regexp.last_match(1)}/clusterkit"
+rescue LoadError
+  require "clusterkit/clusterkit"
+end
+
 require_relative "clusterkit/configuration"
 
 # Main module for ClusterKit gem
