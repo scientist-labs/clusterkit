@@ -1,7 +1,7 @@
 name: Release
 
 # Thin caller for the shared scientist-labs/rust-gem-release reusable workflow (pinned
-# @0.10.0, an explicit version). It owns only what a reusable (on: workflow_call) workflow cannot:
+# @0.11.0, an explicit version). It owns only what a reusable (on: workflow_call) workflow cannot:
 # the tag trigger, the contents:write token grant, and clusterkit's per-gem inputs.
 #
 # Release procedure (the tag drives it; a CI-created tag would not re-trigger):
@@ -22,6 +22,10 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+.*"     # v-prefixed prerelease: v0.2.6.pre
   workflow_dispatch:
     inputs:
+      version:
+        type: string
+        default: ""
+        description: "Version to cut + release, e.g. 1.0.0 (blank = build-only dry-run)"
       publish:
         type: boolean
         default: false
@@ -45,12 +49,15 @@ jobs:
     # Normal PRs skip the expensive matrix; only a `dry-run-release` label opts in.
     # Tag pushes and manual dispatch always run.
     if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'dry-run-release') }}
-    uses: scientist-labs/rust-gem-release/.github/workflows/release.yml@0.10.0
+    uses: scientist-labs/rust-gem-release/.github/workflows/release.yml@0.11.0
     with:
       # gem-name == ext-name == gemspec basename == lib subdir == Cargo package name ==
       # "clusterkit", so ext-name / gemspec / platform-gem-env all use the defaults.
       gem-name: clusterkit
       version-command: ruby -r./lib/clusterkit/version -e 'print ClusterKit::VERSION'
+      version: ${{ inputs.version }}
+      bump-command: |
+        sed -i 's/^\( *VERSION *= *\).*/\1"'"$VERSION"'"/' lib/clusterkit/version.rb
       # Publish only on tag push, or on a manual dispatch that explicitly opts in.
       # Every PR (dry-run-release matrix) stays publish=false.
       publish: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
