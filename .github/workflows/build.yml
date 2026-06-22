@@ -8,6 +8,6 @@ on: pull_request
 
 jobs:
   test:
-    uses: scientist-labs/rust-gem-release/.github/workflows/build.yml@0.10.0
+    uses: scientist-labs/rust-gem-release/.github/workflows/build.yml@0.11.0
     with:
       test-command: bundle exec rake spec
