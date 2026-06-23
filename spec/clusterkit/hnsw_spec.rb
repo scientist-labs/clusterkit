@@ -124,7 +124,10 @@ RSpec.describe ClusterKit::HNSW do
     end
 
     it 'handles k larger than index size' do
-      results = index.search([1.0, 1.0], k: 10)
+      # Use ef: 50 to ensure comprehensive graph traversal in a tiny 4-item index.
+      # Without a generous ef the HNSW search graph may not visit all nodes,
+      # causing a non-deterministic result < index_size on Ruby 3.3.
+      results = index.search([1.0, 1.0], k: 10, ef: 50)
       expect(results.size).to eq(4)  # Only 4 items in index
     end
   end
