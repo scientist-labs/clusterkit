@@ -1,13 +1,68 @@
 name: build
 
-# Thin PR-CI caller for the shared scientist-labs/rust-gem-release build workflow
-# (pinned @0.10.0). Replaces the hand-rolled ci.yml: checkout + setup-ruby + cargo cache +
-# rake compile + rake spec now live once in the shared workflow.
+# PR-CI for clusterkit. Clusterkit uses the openblas-system Cargo feature on
+# Linux (links the distro OpenBLAS instead of compiling it from source), so we
+# need libopenblas-dev installed before `rake compile`. The shared reusable
+# workflow (rust-gem-release/build.yml) does not yet support a pre-compile
+# packages step, so this is an inline workflow that mirrors what the shared
+# workflow does while adding the apt install step.
 
 on: pull_request
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    uses: scientist-labs/rust-gem-release/.github/workflows/build.yml@0.11.0
-    with:
-      test-command: bundle exec rake spec
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby-version: ["3.3", "3.4"]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Install OpenBLAS system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libopenblas-dev liblapack-dev gfortran
+
+      - uses: oxidize-rb/actions/setup-ruby-and-rust@e5f9a49a7812a078584072f6e3f657ad247c8771 # v1.4.4
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          rustup-toolchain: stable
+          bundler-cache: true
+
+      - name: Detect Ruby patch version for cache key
+        id: ruby-version
+        run: echo "patch=$(ruby -e 'print RUBY_VERSION')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tmp
+          key: ${{ runner.os }}-cargo-${{ steps.ruby-version.outputs.patch }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ steps.ruby-version.outputs.patch }}-
+
+      - name: Compile native extension
+        run: bundle exec rake compile
+
+      - name: Save Cargo cache
+        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tmp
+          key: ${{ runner.os }}-cargo-${{ steps.ruby-version.outputs.patch }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run specs
+        run: bundle exec rake spec
