@@ -29,7 +29,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libopenblas-dev liblapack-dev gfortran
 
-      - uses: oxidize-rb/actions/setup-ruby-and-rust@e5f9a49a7812a078584072f6e3f657ad247c8771 # v1.4.4
+      - uses: oxidize-rb/actions/setup-ruby-and-rust@ec90b4aa48795518d79be3f5cc478d1d7ccd02a8 # v1.5.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
           rustup-toolchain: stable
